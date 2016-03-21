@@ -1,0 +1,387 @@
+{{{
+	Bmp.kn v1.02 (for Kuin 1.01):
+		Last Modified: 2015/01/01 14:30:36.
+		Created by Tatt(@tatt61880)
+		https://twitter.com/tatt61880
+		https://github.com/tatt61880
+}}}
+
+func New(width: int, height: int): @CImage
+	return (#@CImage).New(width, height)
+end func
+func Load(path: []char): @CImage
+	return (#@CImage).Load(path)
+end func
+
+class CImage()
+	-var width: int
+	-var height: int
+	-var data: [][]@CRgba
+
+	func New(width: int, height: int): @CImage
+		do me.width :: width
+		do me.height :: height
+		do me.data :: #[me.height][]@CRgba
+		var white: @CRgba :: [255 $ byte8, 255 $ byte8, 255 $ byte8, 255 $ byte8] $ @CRgba
+		for y(0, me.height - 1)
+			do me.data[y] :: #[me.width]@CRgba
+			for x(0, me.width - 1)
+				do me.data[y][x] :: ##white
+			end for
+		end for
+		return me
+	end func
+
+	func Load(path: []char): @CImage
+		if((#cBmp).IsBmp(path))
+			var bmp: cBmp :: (#cBmp).Load(path)
+			do me.width :: bmp.Width()
+			do me.height :: bmp.Height()
+			do me.data :: bmp.Data()
+		else
+			do Dbg@Log("[Bmp.kn] Windows用のBMP形式画像（マジックナンバー=BM）以外には未対応です。")
+			assert false
+		end if
+		return me
+	end func
+
+	func Save(path: []char, type: @EFiletype): bool
+		switch(type)
+		case(@EFiletype#Bmp_24bit)
+			return (#cBmp).Save(me, path, type)
+		end switch
+		return false
+	end func
+
+	class cBmp()
+		-var width: int
+		-var height: int
+		-var data: [][]@CRgba
+
+		-var bmph: cBitmapFileHeader
+		-var dibh: cDibHeader
+		-var palette: []@CRgba
+
+		func Load(path: []char): cBmp
+			var stream: File@CLoadStream :: File@LoadFileStream(path)
+			if(stream =& null)
+				return null
+			end if
+			do me.bmph :: (#cBitmapFileHeader).Read(stream)
+			do me.dibh :: (#cDibHeader).Read(stream)
+			do me.width :: me.dibh.width
+			do me.height :: me.dibh.height
+
+			{streamからカラーパレットを読み込む}
+			switch bpp(me.dibh.Bpp())
+			case(1, 2, 4, 8, 16)
+				do me.palette :: #[2 ^ bpp]@CRgba
+				for i(0, 2^bpp - 1)
+					do me.palette[i] :: #@CRgba
+					do me.palette[i].b :: stream.Read(1)[0]
+					do me.palette[i].g :: stream.Read(1)[0]
+					do me.palette[i].r :: stream.Read(1)[0]
+					do me.palette[i].a :: 255 $ byte8
+					do stream.Read(1)
+				end for
+			case(24)
+			case(32)
+			default
+				do Dbg@Log("[Bmp.kn] 1ピクセルあたりのビット数(bpp: bit per pixel)が異常です。")
+				assert false
+			end switch
+
+			{streamからbitmapを読み込む}
+			do me.data :: #[me.height][]@CRgba
+			for y(0, me.height - 1)
+				do me.data[y] :: #[me.width]@CRgba
+				for x(0, me.width - 1)
+					do me.data[y][x] :: #@CRgba
+				end for
+			end for
+
+			var xSize: int :: me.width * me.dibh.Bpp() / 8 + 3
+			do xSize :- xSize % 4
+
+			switch bpp(me.dibh.Bpp())
+			case(1)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x] :: me.palette[bin[x / 8].Shr(7 - x % 8).And(1 $ byte8) $ int]
+					end for
+				end for
+			case(2)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x] :: me.palette[bin[x / 4].Shr((3 - x % 4) * 2).And(3 $ byte8) $ int]
+					end for
+				end for
+			case(4)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x] :: me.palette[bin[x / 2].Shr((1 - x % 2) * 4).And(15 $ byte8) $ int]
+					end for
+				end for
+			case(8)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x] :: me.palette[bin[x] $ int]
+					end for
+				end for
+			case(16)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x] :: me.palette[bin[2 * x] $ int + bin[2 * x + 1] $ int * 255]
+					end for
+				end for
+			case(24)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x].b :: bin[3 * x + 0]
+						do me.data[y][x].g :: bin[3 * x + 1]
+						do me.data[y][x].r :: bin[3 * x + 2]
+						do me.data[y][x].a :: 255 $ byte8 {不透明}
+					end for
+				end for
+			case(32)
+				for y(0, me.height - 1)
+					var bin: []byte8 :: stream.Read(xSize)
+					for x(0, me.width - 1)
+						do me.data[y][x].b :: bin[4 * x + 0]
+						do me.data[y][x].g :: bin[4 * x + 1]
+						do me.data[y][x].r :: bin[4 * x + 2]
+						do me.data[y][x].a :: bin[4 * x + 3]
+					end for
+				end for
+			default
+				do Dbg@Log("[Bmp.kn] 1ピクセルあたりのビット数(bpp: bit per pixel)が異常です。")
+				assert false
+			end switch
+
+			return me
+		end func
+
+		func Save(img: @CImage, path: []char, type: @EFiletype): bool
+			var stream: File@CSaveStream :: File@SaveFileStream(path, false)
+			if(stream =& null)
+				return false
+			end if
+			switch(type)
+			case(@EFiletype#Bmp_24bit)
+				var xSize: int :: 3 * img.Width() + 3
+				do xSize :- xSize % 4
+				var filesize: int :: 14 + 40 + xSize * img.Height()
+				var bin: []byte8 :: #[filesize]byte8
+				do bin[0] :: 'B' $ byte8
+				do bin[1] :: 'M' $ byte8
+				var binFilesize: []byte8 :: filesize.ToBins()
+				do bin[2] :: binFilesize[0]
+				do bin[3] :: binFilesize[1]
+				do bin[4] :: binFilesize[2]
+				do bin[5] :: binFilesize[3]
+				do bin[10] :: 54 $ byte8 {ファイル先頭からデータ先頭までのオフセット}
+				do bin[14] :: 40 $ byte8 {情報ヘッダのサイズ}
+				var binWidth: []byte8 :: img.Width().ToBins()
+				var binHeight: []byte8 :: img.Height().ToBins()
+				do bin[18] :: binWidth[0]
+				do bin[19] :: binWidth[1]
+				do bin[20] :: binWidth[2]
+				do bin[21] :: binWidth[3]
+				do bin[22] :: binHeight[0]
+				do bin[23] :: binHeight[1]
+				do bin[24] :: binHeight[2]
+				do bin[25] :: binHeight[3]
+				do bin[26] :: 1 $ byte8
+				do bin[28] :: 24 $ byte8 {bpp}
+				var binDatasize: []byte8 :: (xSize * img.Height()).ToBins()
+				do bin[34] :: binDatasize[0]
+				do bin[35] :: binDatasize[1]
+				do bin[36] :: binDatasize[2]
+				do bin[37] :: binDatasize[3]
+				do bin[38] :: 16#c4 $ byte8{水平解像度}
+				do bin[39] :: 16#0e $ byte8{水平解像度}
+				do bin[42] :: 16#c4 $ byte8{垂直解像度}
+				do bin[43] :: 16#0e $ byte8{垂直解像度}
+				var p: @CRgba
+				var offset: int
+				for y(0, img.Height() - 1)
+					for x(0, img.Width() - 1)
+						do p :: img.GetPixel(x, y)
+						do offset :: 14 + 40 + xSize * y + 3 * x
+						do bin[offset + 0] :: p.b
+						do bin[offset + 1] :: p.g
+						do bin[offset + 2] :: p.r
+					end for
+				end for
+				do stream.Write(bin)
+				return true
+			default
+				do stream.WriteStr("[Bmp.kn] 指定されたファイル形式での保存は未実装です。") {TODO}
+				return false
+			end switch
+		end func
+
+		func Width(): int
+			return me.width
+		end func
+
+		func Height(): int
+			return me.height
+		end func
+
+		func Data(): [][]@CRgba
+			return me.data
+		end func
+
+		class cBitmapFileHeader()
+			-var id: []byte8
+			-var filesize: int
+			-var reserved1: []byte8
+			-var reserved2: []byte8
+			-var offset: int
+
+			func Read(stream: File@CLoadStream): cBitmapFileHeader
+				do stream.Seek(0, File@EOrigin#Head)
+				do me.id :: stream.Read(2)
+				do me.filesize :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.reserved1 :: stream.Read(2)
+				do me.reserved2 :: stream.Read(2)
+				do me.offset :: (stream.Read(4) ~ #[4]byte8) $ int
+				do Dbg@Log("[Bmp.kn] filesize = " ~ (me.filesize).ToStr() ~ "byte")
+				return me
+			end func
+		end class
+
+		class cDibHeader()
+			-var meHeaderSize: int
+			var width: int
+			var height: int
+			-var planeNum: int
+			-var bpp: int
+			-var compressMethod: eCompressMethod
+			-var imgSize: int
+			-var horResolution: int
+			-var colResolution: int
+			-var colorNum: int
+			-var importantColor: int
+			func Read(stream: File@CLoadStream): cDibHeader
+				{
+				do Dbg@Log("[Bmp.kn] ※Tell() = 0x" ~ stream.Tell().ToStrF("x"))
+				}
+				do me.meHeaderSize :: (stream.Read(4) ~ #[4]byte8) $ int
+				if(me.meHeaderSize <> 40)
+					do Dbg@Log("[Bmp.kn] BITMAPINFOHEADER以外の情報ヘッダを持つBMP画像には未対応です。")
+					do Dbg@Log("[Bmp.kn] ヘッダサイズ: " ~ me.meHeaderSize.ToStr())
+					assert false
+				end if
+				do me.width :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.height :: (stream.Read(4) ~ #[4]byte8) $ int
+				do Dbg@Log("[Bmp.kn] width = " ~ me.width.ToStr() ~ ", height = " ~ me.height.ToStr())
+				do me.planeNum :: (stream.Read(2) ~ #[6]byte8) $ int
+				do me.bpp :: (stream.Read(2) ~ #[6]byte8) $ int
+				do me.compressMethod :: (stream.Read(4) ~ #[4]byte8) $ eCompressMethod
+				if(me.compressMethod <> eCompressMethod#BI_RGB)
+					do Dbg@Log("[Bmp.kn] BI_RGB以外の圧縮形式のBMP画像には未対応です。")
+					assert false
+				end if
+				do me.imgSize :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.horResolution :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.colResolution :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.colorNum :: (stream.Read(4) ~ #[4]byte8) $ int
+				do me.importantColor :: (stream.Read(4) ~ #[4]byte8) $ int
+				do Dbg@Log("[Bmp.kn] bpp = " ~ (me.bpp).ToStr())
+
+				return me
+			end func
+
+			func Bpp(): int
+				return me.bpp
+			end func
+
+			enum eCompressMethod
+				BI_RGB
+				BI_RLE8
+				BI_RLE4
+				BI_BITFIELDS
+				BI_JPEG
+				BI_PNG
+				BI_ALPHABITFIELDS
+			end enum
+		end class
+
+		func IsBmp(path: []char): bool
+			var stream: File@CLoadStream :: File@LoadFileStream(path)
+			var id: []byte8 :: stream.Read(2)
+			return ((id[0] $ char) = 'B' & (id[1] $ char) = 'M') ?(true, false)
+		end func
+	end class
+
+	func Width(): int
+		return me.width
+	end func
+
+	func Height(): int
+		return me.height
+	end func
+
+	func GetPixel(x: int, y: int): @CRgba
+		return me.data[y][x]
+	end func
+
+	func SetPixel(x: int, y: int, d: @CRgba)
+		do me.data[y][x] :: ##d
+	end func
+end class
+
+class CRgba()
+	var r: byte8
+	var g: byte8
+	var b: byte8
+	var a: byte8
+	-+func Cmp(t: Kuin@CClass): int
+		var tt: @CRgba :: t $ @CRgba
+		if(me.r = tt.r & me.g = tt.g & me.b = tt.b & me.a = tt.a)
+			return 0
+		end if
+		if(me.r > tt.r)
+			return 1
+		end if
+		if(me.r < tt.r)
+			return -1
+		end if
+		if(me.g > tt.g)
+			return 1
+		end if
+		if(me.g < tt.g)
+			return -1
+		end if
+		if(me.b > tt.b)
+			return 1
+		end if
+		if(me.b < tt.b)
+			return -1
+		end if
+		if(me.a > tt.a)
+			return 1
+		end if
+		if(me.a < tt.a)
+			return -1
+		end if
+		return 0
+	end func
+end class
+
+enum EFiletype
+	Bmp_1bit
+	Bmp_4bit
+	Bmp_8bit
+	Bmp_16bit
+	Bmp_24bit
+	Bmp_32bit
+end enum

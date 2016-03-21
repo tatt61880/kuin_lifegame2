@@ -1,0 +1,326 @@
+func Init(cfg: Kuin@CCfg)
+	do cfg.Title :: "Lifegame"
+end func
+
+const datFilename: []char :: "input.dat"
+const inputFilename: []char :: "input.bmp"
+
+enum EData
+	Black
+	White
+	Target
+end enum
+
+{data[h][w]から連続(斜めに繋がっているのもあり)しているBlackをすべてTargetにする}
+func SetTarget(data: [][]@EData, h: int, w: int)
+	if(h >= 0 & w >= 0 & h < data.Len() & w < data[0].Len() & data[h][w] = @EData#Black)
+		do data[h][w] :: @EData#Target
+		do @SetTarget(data, h - 1, w - 1)
+		do @SetTarget(data, h - 1, w    )
+		do @SetTarget(data, h - 1, w + 1)
+		do @SetTarget(data, h    , w - 1)
+		do @SetTarget(data, h    , w + 1)
+		do @SetTarget(data, h + 1, w - 1)
+		do @SetTarget(data, h + 1, w    )
+		do @SetTarget(data, h + 1, w + 1)
+	end if
+end func
+
+func CreateData()
+	var InputFileName: []char
+	if(Kuin@GetCmdLines().Len() > 1)
+		do InputFileName :: Kuin@GetCmdLines()[1]
+	else
+		do InputFileName :: @inputFilename
+	end if
+	do Dbg@Log("入力ファイル: " ~ InputFileName)
+	var img: Bmp@CImage
+	try
+		do img :: Bmp@Load(InputFileName)
+	catch()
+		do Dbg@Log("ファイルが開けませんでした")
+		while()
+			do Kuin@Act()
+		end while
+	end try
+
+	{画像データ取得(元データ)}
+	var data: [][]@EData :: #[img.Height()][]@EData
+	for h(0, img.Height()-1)
+		do data[h] :: #[img.Width()]@EData
+		for w(0, img.Width()-1)
+			if(img.GetPixel(w, img.Height() - h - 1).r = 0 $ byte8) {※画像データには黒白以外の色は使われていない前提}
+				do data[h][w] :: @EData#Black
+			else
+				do data[h][w] :: @EData#White
+			end if
+		end for
+	end for
+
+	{画像データ解析}
+	{解析データの初期化}
+	var data2: [][]int :: #[data.Len()][]int
+	for h(0, data.Len()-1)
+		do data2[h] :: #[data[0].Len()]int
+		for w(0, img.Width()-1)
+			do data2[h][w] :: -1
+		end for
+	end for
+	{解析}
+	for h(0, data.Len()-1)
+		for w(0, data[0].Len()-1)
+			if(data[h][w] = @EData#Black)
+				do @SetTarget(data, h, w)
+
+				{脚の部分(先に脚から解析することで、頭が脚に挟まれた状態のブロックも良い感じ)}
+				var legL: int
+				var legR: int
+				for h(data.Len()-1, 0, -1)
+					for w(0, data[0].Len()-1)
+						if(data[h][w] = @EData#Target)
+							do legL :: w
+							for w(data[0].Len()-1, 0, -1)
+								if(data[h][w] = @EData#Target)
+									do legR :: w
+									break w
+								end if
+							end for
+
+							if(legL = legR)
+								do data2[h][legL] :: 5
+								do data[h][legL] :: @EData#White
+							else
+								do data2[h][legL] :: 6
+								do data[h][legL] :: @EData#White
+								do data2[h][legR] :: 7
+								do data[h][legR] :: @EData#White
+							end if
+							break h
+						end if
+					end for
+				end for
+
+				{顔の部分}
+				var faceL: int
+				var faceR: int
+				for h(0, data.Len()-1)
+					for w(0, data[0].Len()-1)
+						if(data[h][w] = @EData#Target)
+							do faceL :: w
+							for w(data[0].Len()-1, 0, -1)
+								if(data[h][w] = @EData#Target)
+									do faceR :: w
+									break w
+								end if
+							end for
+
+							if(faceL = faceR)
+								do data2[h][faceL] :: 1
+								do data[h][faceL] :: @EData#White
+							elif(faceL = faceR - 1)
+								do data2[h][faceL] :: 8
+								do data[h][faceL] :: @EData#White
+								do data2[h][faceL + 1] :: 9
+								do data[h][faceL + 1] :: @EData#White
+							elif(faceL = faceR - 2)
+								if(data[h][faceL + 1] = @EData#Target)
+									do data2[h][faceL] :: 2
+									do data[h][faceL] :: @EData#White
+									do data2[h][faceL + 1] :: 3
+									do data[h][faceL + 1] :: @EData#White
+									do data2[h][faceL + 2] :: 4
+									do data[h][faceL + 2] :: @EData#White
+								else
+									do data2[h][faceL] :: 1
+									do data[h][faceL] :: @EData#White
+								end if
+							else
+								do data2[h][faceL] :: 1
+								do data[h][faceL] :: @EData#White
+							end if
+							break h
+						end if
+					end for
+				end for
+
+				{それ以外}
+				for h(0, data.Len()-1)
+					for w(0, data[0].Len()-1)
+						if(data[h][w] = @EData#Target)
+							do data2[h][w] :: 0
+							do data[h][w] :: @EData#White
+						end if
+					end for
+				end for
+			end if
+		end for
+	end for
+
+	{解析した結果をファイルに書き込む}
+	var fp: File@CSaveStream :: File@SaveFileStream(@datFilename, false)
+	for h(0, data.Len()-1)
+		var str: []char :: ""
+		for w(0, img.Width()-1)
+			if(data2[h][w] = -1)
+				do str :~ " "
+			else
+				do str :~ data2[h][w].ToStr()
+			end if
+		end for
+		{
+		do Dbg@Log(str)
+		}
+		do str :~ "\n"
+		do fp.WriteStr(str)
+	end for
+end func
+
+var count: int
+var cameraInitialFlag: bool
+var camera: Camera@CCamera
+
+func Main()
+	do @CreateData()
+	do @cameraInitialFlag :: true
+	while()
+		do @Lifegame()
+	end while
+end func
+
+func InitCamera(camera :&Camera@CCamera)
+	do camera :: (#Camera@CCamera).Init(0.0, 0.0, 0.0)
+end func
+
+func MoveCamera(camera :&Camera@CCamera)
+	if(Input@Pad(0, Input@EBtn#Left) > 0)
+		do camera.RotRelHor(0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#Right) > 0)
+		do camera.RotRelHor(-0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#Up) > 0)
+		do camera.RotRelVer(0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#Down) > 0)
+		do camera.RotRelVer(-0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#C) > 0)
+		do camera.RotRelUp(0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#D) > 0)
+		do camera.RotRelUp(-0.03)
+	end if
+	if(Input@Pad(0, Input@EBtn#R) > 0 | Input@Pad(0, Input@EBtn#A) > 0)
+		do camera.MoveDir(1.0)
+	end if
+	if(Input@Pad(0, Input@EBtn#L) > 0 | Input@Pad(0, Input@EBtn#B) > 0)
+		do camera.MoveDir(-1.0)
+	end if
+	if(Input@Pad(0, Input@EBtn#C) > 0 & Input@Pad(0, Input@EBtn#D) > 0)
+		do @InitCamera(&camera)
+	end if
+end func
+
+func Lifegame()
+	do @count :: 0
+	var box: []Draw@CObj :: #[10]Draw@CObj
+	var tattTex: Draw@CTex :: Draw@LoadTex("tatt61880.png.kntex")
+	for i(0, 9)
+		do box[i] :: Draw@LoadObj(i.ToStr() ~ ".knobj")
+		do box[i].MoveScale(0.5, 0.5, 0.5)
+	end for
+
+	var imgdata: [][]char :: #[0][]char
+	block
+		var fp: File@CLoadStream :: File@LoadFileStream(@datFilename)
+		if(fp =& null)
+			do Dbg@Log("Error: " ~ @datFilename ~ "を読み込めません。")
+		end if
+		while(fp.ChkEnd() = false)
+			do imgdata :~ [fp.ReadStr()]
+		end while
+	end block
+
+	if(@cameraInitialFlag)
+		do @cameraInitialFlag :: false
+		do @InitCamera(&@camera)
+		do @camera.MoveDir(-(imgdata[0].Len() > imgdata.Len() ?(imgdata[0].Len(), imgdata.Len())) $ float * 1.5)
+	end if
+
+	while()
+		do Kuin@Act()
+		do Draw@Rect(0.0, 0.0, 1600.0, 900.0, 1.0, 1.0, 1.0, 1.0)
+		{FPSチェック。点滅する緑色の点が赤い点の上になければ、FPSが低下しています}
+		do Draw@Rect(100.0, 0.0, 10.0, 10.0, 1.0, 0.0, 0.0, 1.0)
+		if((Kuin@Cnt() / 10) % 3 <> 0)
+			do Draw@Rect((Kuin@FPS() * 100.0), 0.0, 10.0, 10.0, 0.0, 1.0, 0.0, 1.0)
+		end if
+
+		func lifegame(imgdata: &[][]char)
+			do @count :+ 1
+			var H: int :: imgdata.Len()
+			var W: int :: imgdata[0].Len()
+			var tmpdata: [][]char :: ##imgdata
+			for i(0, H - 1)
+				if(imgdata[i] =& null){※最後の行がnullの場合にも落ちないように。}
+					continue i
+				end if
+				for j(0, W - 1)
+					var n: int :: 0
+					{{左右・上下が繋がっていないパターン}
+					do n :+ (i > 0 & j > 0 & imgdata[i - 1][j - 1] <> ' ') ?(1, 0)
+					do n :+ (i > 0         & imgdata[i - 1][j    ] <> ' ') ?(1, 0)
+					do n :+ (i > 0 & j < W & imgdata[i - 1][j + 1] <> ' ') ?(1, 0)
+					do n :+ (        j > 0 & imgdata[i    ][j - 1] <> ' ') ?(1, 0)
+					do n :+ (        j < W & imgdata[i    ][j + 1] <> ' ') ?(1, 0)
+					do n :+ (i < H & j > 0 & imgdata[i + 1][j - 1] <> ' ') ?(1, 0)
+					do n :+ (i < H         & imgdata[i + 1][j    ] <> ' ') ?(1, 0)
+					do n :+ (i < H & j < W & imgdata[i + 1][j + 1] <> ' ') ?(1, 0)
+					}
+					{左右・上下が繋がっているパターン}
+					do n :+ (imgdata[(H + i - 1) % H][(W + j - 1) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i - 1) % H][(W + j    ) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i - 1) % H][(W + j + 1) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i    ) % H][(W + j - 1) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i    ) % H][(W + j + 1) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i + 1) % H][(W + j - 1) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i + 1) % H][(W + j    ) % W] <> ' ') ?(1, 0)
+					do n :+ (imgdata[(H + i + 1) % H][(W + j + 1) % W] <> ' ') ?(1, 0)
+					if(imgdata[i][j] = ' ' & n = 3)
+						do tmpdata[i][j] :: '1'
+					elif(imgdata[i][j] <> ' ' & (n = 2 | n = 3))
+						do tmpdata[i][j] :: '0'
+					else
+						do tmpdata[i][j] :: ' '
+					end if
+				end for
+			end for
+			do imgdata :: ##tmpdata
+		end func
+
+		if(Input@Mouse(Input@EMouse#Left) % 5 = 1) {左マウスボタンを押しっぱなしの時に、どれくらいの速さで更新するかを %～の部分で調整できます}
+			do lifegame(&imgdata)
+		end if
+		for i(0, imgdata.Len() - 1)
+			if(imgdata[i] =& null){※最後の行がnullの可能性がある。}
+				continue i
+			end if
+			for j(0, imgdata[i].Len() - 1)
+				if(imgdata[i][j] = ' ')
+					continue j
+				end if
+				var id: int :: imgdata[i][j] $ int - '0' $ int
+				do box[id].MoveReset()
+				do box[id].MoveTrans((j - imgdata[i].Len() / 2) $ float, (i - imgdata.Len() / 2) $ float, 0.0)
+				do box[id].Draw(tattTex, null, 0, 0.0)
+			end for
+		end for
+
+		do @MoveCamera(&@camera)
+		do @camera.SetCamera()
+		var f: bool :: false
+		if(Input@Pad(0, Input@EBtn#A) > 0 & Input@Pad(0, Input@EBtn#B) > 0)
+			return
+		end if
+	end while
+end func

@@ -1,0 +1,105 @@
+{
+	Camera.kn v1.02 (for Kuin 1.01):
+		Last Modified: 2016/03/21 23:43:19.
+		Created by Tatt(@tatt61880)
+		https://twitter.com/tatt61880
+		https://github.com/tatt61880
+
+	3Dのカメラを動かすライブラリです。
+}
+class CCamera()
+	-var pos: cVector
+	-var dir: cVector
+	-var up: cVector
+	func Init(x: float, y: float, z: float): @CCamera
+		do me.pos :: (#cVector).Init(x, y, z)
+		do me.dir :: (#cVector).Init(0.0, 0.0, -1.0)
+		do me.up  :: (#cVector).Init(0.0, 1.0, 0.0)
+		return me
+	end func
+	func Rot(horAngle: float, verAngle: float)
+		do me.dir :: (#cVector).Init(0.0, 0.0, -1.0)
+		{
+		var up_backup: cVector :: ##me.up
+		}
+		do me.RotRelHor(horAngle)
+		do me.RotRelVer(verAngle)
+		{
+		do me.up :: up_backup
+		}
+	end func
+	func RotRel(horAngle: float, verAngle: float)
+		do me.RotRelHor(horAngle)
+		do me.RotRelVer(verAngle)
+	end func
+	func RotRelHor(angle: float)
+		{up周りの回転. 右ねじの回転が正}
+		do me.RotDir(me.dir, me.up, angle)
+		{
+		do Dbg@Log("[Camera.kn] dir = " ~ me.dir.ToStr())
+		}
+	end func
+	func RotRelVer(angle: float)
+		{dirとupの外積(cross). cross周りの回転. dirをup方向に回転させる向きが正}
+		var cross: cVector :: (#cVector).Init(me.up.y * me.dir.z - me.up.z * me.dir.y, me.up.z * me.dir.x - me.up.x * me.dir.z, me.up.x * me.dir.y - me.up.y * me.dir.x)
+		do me.RotDir(me.dir, cross, angle)
+		do me.RotDir(me.up, cross, angle)
+		{
+		do Dbg@Log("[Camera.kn] dir   = " ~ me.dir.ToStr())
+		do Dbg@Log("[Camera.kn] up    = " ~ me.up.ToStr())
+		do Dbg@Log("[Camera.kn] cross = " ~ cross.ToStr())
+		}
+	end func
+	func RotRelUp(angle: float)
+		{upを回転．右ねじの回転が正}
+		do me.RotDir(me.up, me.dir, angle)
+	end func
+
+	-func RotDir(dir: cVector, axis: cVector, angle: float)
+		var cos: float :: Lib@Cos(angle)
+		var sin: float :: Lib@Sin(angle)
+		var d: cVector :: ##dir
+		do dir.x :: (axis.x * axis.x * (1.0 - cos) +          cos) * d.x + (axis.x * axis.y * (1.0 - cos) - axis.z * sin) * d.y + (axis.z * axis.x * (1.0 - cos) + axis.y * sin) * d.z
+		do dir.y :: (axis.x * axis.y * (1.0 - cos) + axis.z * sin) * d.x + (axis.y * axis.y * (1.0 - cos) +          cos) * d.y + (axis.y * axis.z * (1.0 - cos) - axis.x * sin) * d.z
+		do dir.z :: (axis.z * axis.x * (1.0 - cos) - axis.y * sin) * d.x + (axis.y * axis.z * (1.0 - cos) + axis.x * sin) * d.y + (axis.z * axis.z * (1.0 - cos) +          cos) * d.z
+	end func
+
+	func MoveDir(x: float)
+		do me.pos.x :+ me.dir.x * x
+		do me.pos.y :+ me.dir.y * x
+		do me.pos.z :+ me.dir.z * x
+	end func
+	func MoveRel(x: float, y: float, z: float)
+		do me.pos.x :+ x
+		do me.pos.y :+ y
+		do me.pos.z :+ z
+	end func
+	func MoveAbs(x: float, y: float, z: float)
+		do me.pos.x :: x
+		do me.pos.y :: y
+		do me.pos.z :: z
+	end func
+	func SetCamera()
+		do Draw@SetCamera(me.pos.x, me.pos.y, me.pos.z, (me.pos.x + me.dir.x), (me.pos.y + me.dir.y), (me.pos.z + me.dir.z), me.up.x, me.up.y, me.up.z)
+	end func
+	func GetHor(): float
+		return 0.0
+	end func
+	func GetVer(): float
+		return 0.0
+	end func
+	class cVector()
+		var x: float
+		var y: float
+		var z: float
+		func Init(x: float, y: float, z: float): cVector
+			do me.x :: x
+			do me.y :: y
+			do me.z :: z
+			return me
+		end func
+		func ToStr(): []char
+			return "(" ~ me.x.ToStr() ~ ", " ~ me.y.ToStr() ~ ", " ~ me.z.ToStr() ~ ")"
+		end func
+	end class
+end class
